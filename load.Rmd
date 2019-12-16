@@ -1,0 +1,120 @@
+
+
+```{r load hdf5}
+
+source('hdf5.extractor.R')  # extracting of data from the HDF5 data structures
+
+# if running first time install the below:
+# source("http://bioconductor.org/biocLite.R")
+# biocLite("rhdf5")
+
+files.hdf5 = list.files(path = "./hdf5", pattern = "\\.hdf5$")
+
+# Run the extractor
+hdf5.extractor(files = files.hdf5, dirname = 'hdf5')
+
+
+```
+
+```{r prepocess data from HDF5}
+
+sampleData = data.frame(matrix(nrow = length(files.hdf5), ncol = 5))
+names(sampleData) = c('id','age','gender','glasses','contacts')
+
+for(s in 1:length(hdf5.import.df)){
+    
+    message(sprintf("Processing file %i out of %i - %s", s, length(hdf5.import.df), hdf5.import.df[s]))
+    
+    ## Load both events and eye tracking data to tmp
+    tmp.data    = eval(parse(text = hdf5.import.df[s]))
+    tmp.events  = eval(parse(text = hdf5.import.evt[s]))
+    
+    ## Remove not needed variables:
+    drops <- c('device_id','experiment_id', 'session_id', 'confidence_interval','filter_id','type',
+               'left_gaze_z','left_angle_x','left_angle_y','left_raw_x', 'left_raw_y',
+               'left_pupil_measure2', 'left_pupil_measure2_type','left_ppd_x', 'left_ppd_y',
+               'left_velocity_x', 'left_velocity_y','left_velocity_xy','left_pupil_measure1_type',
+               'right_gaze_z','right_angle_x', 'right_angle_y','right_raw_x', 'right_raw_y',
+               'right_pupil_measure2', 'right_pupil_measure2_type','right_ppd_x', 'right_ppd_y',
+               'right_velocity_x', 'right_velocity_y','right_velocity_xy','right_pupil_measure1_type')
+    tmp.data = tmp.data[ , !(names(tmp.data) %in% drops)]
+    remove(drops)
+    
+    
+    ## Create an event structure:
+    # Extract sample info:
+    tmpsample = tmp.events$text
+    sampleData$age[s] = sapply(strsplit(grep('AGE: ', tmpsample, value = TRUE), split = ": "), "[", 2)
+    sampleData$gender[s] = sapply(strsplit(grep('GENDER: ', tmpsample, value = TRUE), split = ": "), "[", 2)
+    sampleData$glasses[s] = sapply(strsplit(grep('GLASSES: ', tmpsample, value = TRUE), split = ": "), "[", 2)
+    sampleData$contacts[s] = sapply(strsplit(grep('CONTACTS: ', tmpsample, value = TRUE), split = ": "), "[", 2)
+    sampleData$id[s] = sapply(strsplit(grep('SUBJECT ID: ', tmpsample, value = TRUE), split = ": "), "[", 2)
+    
+    # 1. subset trial messages = remove sample info
+    tmp.events$text[2] = NA
+    tmp.events = subset(tmp.events, grepl("t", tmp.events$text))
+    tmp.events$start = NA
+    tmp.events$end = NA
+    tmp.events$dur = NA
+    
+    # 2. Splice the trial info from the message for easier subsetting later
+    
+    for(l in 1:nrow(tmp.events)){
+        tmp.events$trigger[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",1)         #trigger
+        tmp.events$block[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",2)           #blocks.thisN
+        tmp.events$trial[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",3)           #trials_2.thisN
+        tmp.events$trialIndex[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",4)      #trials_2.thisIndex
+        tmp.events$phase[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",5)           #phasemsg
+        tmp.events$cond[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",6)            #trialmsg
+        tmp.events$ri[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",7)              #ri
+        tmp.events$context[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",8)         #trialContext
+        tmp.events$locationsA[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",9)      #thisLocations A
+        tmp.events$locationsB[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",10)     #thisLocations B
+        tmp.events$locationsC[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",11)     #thisLocations C
+        tmp.events$resp[l] = sapply(strsplit(tmp.events$text[l], split = " "),"[",12)           #response code
+        
+    }
+    
+    for (l in 1:nrow(tmp.events)){
+        
+        # Fix locations, cosmetic related to string formatting
+        tmp.events$locationsA[l] = strsplit(tmp.events$locationsA[l],"'")[[1]][2]    
+        tmp.events$locationsB[l] = strsplit(tmp.events$locationsB[l],"'")[[1]][2]
+        tmp.events$locationsC[l] = strsplit(tmp.events$locationsC[l],"'")[[1]][2]
+        
+        # calcualte durations for trials
+        if (tmp.events$trigger[l] == 'ts'){
+            tmp.events$start[l] = tmp.events$time[l]
+            tmp.events$end[l] = tmp.events$time[l+1]
+            tmp.events$dur[l] = tmp.events$end[l] - tmp.events$start[l]
+            tmp.events$resp[l] = tmp.events$resp[l+1]
+            
+            
+        }
+    }
+    
+    
+    print(sprintf('Trial Durations for %s, max: %f, min: %f, mean: %s', hdf5.import.df[s], max(tmp.events$dur, na.rm = TRUE), min(tmp.events$dur, na.rm = TRUE), mean(tmp.events$dur, na.rm = TRUE)))
+    
+    
+    # Remove end triggers
+    tmp.events = subset(tmp.events, tmp.events$trigger == 'ts')
+    
+    # Assign unique id, helps with trial removal as it contains block and trial no
+    tmp.events$trialId = paste(tmp.events$block, tmp.events$trial, sep = '_')
+    
+    
+    # Remove columns from events file
+    eventdrops = c('experiment_id','session_id','device_id', 'type','confidence_interval','filter_id','msg_offset','category', 'text')
+    tmp.events = tmp.events[ , !names(tmp.events) %in% eventdrops]
+    
+    
+    # Save processed files
+    assign(hdf5.import.evt[s], tmp.events)
+    assign(hdf5.import.df[s], tmp.data)
+    
+}
+```
+
+
+
