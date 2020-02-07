@@ -10,7 +10,9 @@ hdf5.extractor = function(files,
     
     
     # To use this function:
-    # source("/path/to/file/edf.extractor.R")
+    # source("/path/to/file/edf.extractor.R"
+    
+    library('rhdf5')
     
     # Close all open conections
     h5closeAll()

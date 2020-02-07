@@ -5,8 +5,7 @@
 source('hdf5.extractor.R')  # extracting of data from the HDF5 data structures
 
 # if running first time install the below:
-# source("http://bioconductor.org/biocLite.R")
-# biocLite("rhdf5")
+# https://bioconductor.org/packages/release/bioc/html/rhdf5.html
 
 files.hdf5 = list.files(path = "./hdf5", pattern = "\\.hdf5$")
 
